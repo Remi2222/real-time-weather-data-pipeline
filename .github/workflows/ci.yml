@@ -30,5 +30,12 @@ jobs:
         run: |
           python -m compileall scripts
 
+      - name: Create .env
+        run: cp docker/.env.example docker/.env
+
+      - name: Inject Weather API Key
+        run: |
+         echo "WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}" >> docker/.env
+
       - name: Validate Docker Compose
         run: docker compose config
