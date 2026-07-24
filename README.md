@@ -157,4 +157,3 @@ docker compose up -d
 **Maryam Fajri**
 
 - LinkedIn: https://www.linkedin.com/in/maryam-fajri/
-- GitHub: https://github.com/YOUR_USERNAME
