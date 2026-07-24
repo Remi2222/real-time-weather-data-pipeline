@@ -1,5 +1,6 @@
 name: Weather Pipeline CI
-
+permissions:
+  contents: read
 on:
   push:
     branches:
@@ -11,6 +12,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
 
     steps:
       - name: Checkout Repository
