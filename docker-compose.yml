@@ -1,0 +1,175 @@
+version: "3.9"
+
+x-superset-user: &superset-user root
+
+x-superset-volumes: &superset-volumes
+  - ./docker:/app/docker
+  - ./docker/superset_config.py:/app/pythonpath/superset_config.py
+
+services:
+
+  db:
+    image: postgres:14.17
+    container_name: postgress_container
+
+    ports:
+      - "5403:5432"
+
+    environment:
+      POSTGRES_DB: db
+      POSTGRES_USER: db_user
+      POSTGRES_PASSWORD: db_password
+
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/airflow_init.sql:/docker-entrypoint-initdb.d/airflow_init.sql
+      - ./postgres/superset_init.sql:/docker-entrypoint-initdb.d/superset_init.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U db_user -d db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+    networks:
+      - my-network
+
+  airflow:
+    image: apache/airflow:3.0.0
+    container_name: airflow_container
+
+    ports:
+      - "8000:8080"
+
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@db:5432/airflow_db
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      WEATHER_API_KEY: ${WEATHER_API_KEY}
+
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    command: >
+      bash -c "
+      sleep 10 &&
+      airflow db migrate &&
+      airflow standalone
+      "
+
+    networks:
+      - my-network
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.latest
+    container_name: dbt_container
+
+    working_dir: /usr/app
+
+    volumes:
+      - ./dbt/my_project:/usr/app
+      - ./dbt:/root/.dbt
+
+    environment:
+      DBT_PROFILES_DIR: /root/.dbt
+      DBT_TARGET: dev
+
+    depends_on:
+      db:
+        condition: service_healthy
+      airflow:
+        condition: service_started
+
+    command: >
+      bash -c "
+      sleep 20 &&
+      dbt run
+      "
+
+    networks:
+      - my-network
+
+  redis:
+    image: redis:7
+
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis:/data
+
+    networks:
+      - my-network
+
+  superset-init:
+    image: apache/superset:3.0.0-py310
+
+    user: *superset-user
+
+    env_file:
+      - docker/.env
+
+    command: ["/app/docker/docker-init.sh"]
+
+    volumes: *superset-volumes
+
+    environment:
+      DATABASE_DB: superset_db
+      SUPERSET_LOAD_EXAMPLES: "no"
+      SUPERSET_LOG_LEVEL: info
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+    healthcheck:
+      disable: true
+
+    networks:
+      - my-network
+
+  superset:
+    image: apache/superset:3.0.0-py310
+
+    user: *superset-user
+
+    env_file:
+      - docker/.env
+
+    command: ["/app/docker/docker-bootstrap.sh", "app"]
+
+    restart: unless-stopped
+
+    ports:
+      - "8088:8088"
+
+    volumes: *superset-volumes
+
+    environment:
+      DATABASE_DB: superset_db
+      SUPERSET_LOG_LEVEL: info
+
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+
+    networks:
+      - my-network
+
+networks:
+  my-network:
+    driver: bridge
+
+volumes:
+  redis:
